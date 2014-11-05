@@ -40,8 +40,8 @@ class VolumeRenderingManager:
         # self.shiftScale = vtk.vtkImageShiftScale()
         # self.shiftScale.SetOutputScalarTypeToUnsignedChar()
         self.alphaFunc = vtk.vtkPiecewiseFunction()
-        self.alphaFunc.AddPoint(0, 0.0)
-        self.alphaFunc.AddPoint(255, 1.0)
+        # self.alphaFunc.AddPoint(0, 0.0)
+        # self.alphaFunc.AddPoint(255, 1.0)
         self.colorFunc = vtk.vtkColorTransferFunction()
         self.setupColorFunc()
         # self.colorFunc.AddRGBPoint(0, 0.0, 0.0, 0.0)
@@ -86,6 +86,10 @@ class VolumeRenderingManager:
             blueVal = record[3]
             self.colorFunc.AddRGBPoint(pointIdx, redVal,
                                        greenVal, blueVal)
+        # setup alpha function
+        self.alphaFunc.RemoveAllPoints()
+        self.alphaFunc.AddPoint(self._min, 0.0)
+        self.alphaFunc.AddPoint(self._max, 1.0)
 
 
 class OverlayDisplayWidget(QFrame):
