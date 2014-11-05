@@ -507,6 +507,7 @@ class ManualRegistrationWidget(QWidget):
         if fname:
             self.transformMatrix = np.load(fname)
         self.updateMatrixText()
+        self.imageDisplay.setMatrix(self.transformMatrix)
 
     @pyqtSlot()
     def minMaxChangedFixed(self):
