@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
-from ImageSliceDisplay import MinMaxDialog, ImageStat
+# my own library
+from imageproc.ImageSliceDisplay import MinMaxDialog, ImageStat
 from PyQt4.QtGui import QApplication, QFont
 from PyQt4.QtGui import QWidget, QFrame, QGroupBox
 from PyQt4.QtGui import QPushButton, QComboBox, QLabel
@@ -33,40 +34,42 @@ _gray_data = (
 
 class VolumeRenderingManager:
 
-    def __init__(self, cmData):
+    def __init__(self, cmData, reslice=None):
         self.cmData = cmData
         self._min = 0
         self._max = 255
-        # self.shiftScale = vtk.vtkImageShiftScale()
-        # self.shiftScale.SetOutputScalarTypeToUnsignedChar()
+        self.dataImport = vtk.vtkImageImport()
+        self.dataImport.SetDataScalarTypeToUnsignedChar()
+        self.dataImport.SetNumberOfScalarComponents(1)
         self.alphaFunc = vtk.vtkPiecewiseFunction()
-        # self.alphaFunc.AddPoint(0, 0.0)
-        # self.alphaFunc.AddPoint(255, 1.0)
         self.colorFunc = vtk.vtkColorTransferFunction()
         self.setupColorFunc()
-        # self.colorFunc.AddRGBPoint(0, 0.0, 0.0, 0.0)
-        # self.colorFunc.AddRGBPoint(255, 1.0, 1.0, 1.0)
         self.prop = vtk.vtkVolumeProperty()
         self.prop.SetColor(self.colorFunc)
         self.prop.SetScalarOpacity(self.alphaFunc)
-        self.mipFunc = vtk.vtkVolumeRayCastMIPFunction()
-        self.mapper = vtk.vtkVolumeRayCastMapper()
-        self.mapper.SetVolumeRayCastFunction(self.mipFunc)
-        # self.mapper.SetInputConnection(self.shiftScale.GetOutputPort())
+        self.mapper = vtk.vtkSmartVolumeMapper()
+        self.mapper.SetBlendModeToMaximumIntensity()
+        if reslice is not None:
+            reslice.SetInputConnection(self.dataImport.GetOutputPort())
+            self.mapper.SetInputConnection(reslice.GetOutputPort())
+        else:
+            self.mapper.SetInputConnection(self.dataImport.GetOutputPort())
         self.volume = vtk.vtkVolume()
         self.volume.SetMapper(self.mapper)
         self.volume.SetProperty(self.prop)
 
-    def setInput(self, imgVtk):
-        # self.shiftScale.SetInput(imgVtk)
-        self.mapper.SetInput(imgVtk)
+    def setInput(self, imgNpy):
+        assert(imgNpy.dtype == np.uint8)
+        nx, ny, nz = imgNpy.shape
+        dataString = imgNpy.tostring(order='F')
+        self.dataImport.CopyImportVoidPointer(dataString,
+                                              len(dataString))
+        self.dataImport.SetDataExtent(0, nx-1, 0, ny-1, 0, nz-1)
+        self.dataImport.SetWholeExtent(0, nx-1, 0, ny-1, 0, nz-1)
+        self.dataImport.Update()
 
     def setMinMax(self, _min, _max):
         assert(_max >= _min)
-        # shift = _min
-        # scale = 255.0 / (_max - _min)
-        # self.shiftScale.SetShift(shift)
-        # self.shiftScale.SetScale(scale)
         self._max = _max
         self._min = _min
         self.setupColorFunc()
@@ -134,32 +137,24 @@ class OverlayDisplayWidget(QFrame):
             return
         else:
             assert(imBg.dtype == np.uint8)
-        if self.imVtkBg is not None:
-            del self.imVtkBg
-        self.imVtkBg = self.convertNpyToVtk(imBg)
         if self.mgrBg is None:
             self.mgrBg = VolumeRenderingManager(_gray_data)
-        self.mgrBg.setInput(self.imVtkBg)
+            self.ren.AddVolume(self.mgrBg.volume)
+        self.mgrBg.setInput(imBg)
         self.mgrBg.setMinMax(_min, _max)
         self.mgrBg.update()
-        self.ren.AddVolume(self.mgrBg.volume)
 
     def setVolumeFg(self, imFg, _min, _max):
         if imFg is None:
             return
         else:
             assert(imFg.dtype == np.uint8)
-        if self.imVtkFg is not None:
-            del self.imVtkFg
-        self.imVtkFg = self.convertNpyToVtk(imFg)
-        self.reslice.SetInput(self.imVtkFg)
-        self.reslice.Update()
         if self.mgrFg is None:
-            self.mgrFg = VolumeRenderingManager(_hot_data)
-        self.mgrFg.setInput(self.reslice.GetOutput())
+            self.mgrFg = VolumeRenderingManager(_hot_data, self.reslice)
+            self.ren.AddVolume(self.mgrFg.volume)
+        self.mgrFg.setInput(imFg)
         self.mgrFg.setMinMax(_min, _max)
         self.mgrFg.update()
-        self.ren.AddVolume(self.mgrFg.volume)
 
     def setBgMinMax(self, _min, _max):
         self.mgrBg.setMinMax(_min, _max)
@@ -175,10 +170,8 @@ class OverlayDisplayWidget(QFrame):
         nx, ny, nz = imgNpy.shape
         dataImporter = vtk.vtkImageImport()
         dataString = imgNpy.tostring(order='F')
-        # dataString = imgNpy.astype(np.float).tostring(order='F')
         dataImporter.CopyImportVoidPointer(dataString, len(dataString))
         dataImporter.SetDataScalarTypeToUnsignedChar()
-        # dataImporter.SetDataScalarTypeToDouble()
         dataImporter.SetNumberOfScalarComponents(1)
         dataImporter.SetDataExtent(0, nx-1, 0, ny-1, 0, nz-1)
         dataImporter.SetWholeExtent(0, nx-1, 0, ny-1, 0, nz-1)
@@ -196,7 +189,7 @@ class OverlayDisplayWidget(QFrame):
         self.matrix4x4.DeepCopy(matrix)
 
     def render(self):
-        self.ren.Render()
+        # self.ren.Render()
         self.ren.ResetCamera()
 
     def setDirection(self, direction):
@@ -398,11 +391,11 @@ class ManualRegistrationWidget(QWidget):
         self.imFixed = self.normalizeImage(self.load3DTIFFImage(fname))
         self.statsFixed = ImageStat(self.imFixed)
         self.minFixed, self.maxFixed = self.statsFixed.extrema
-        self.buttonMinMaxFixed.setEnabled(True)
         self.statusBar.showMessage('Done loading from %s' % (fname,))
         self.imageDisplay.setVolumeBg(self.imFixed,
                                       self.minFixed, self.maxFixed)
         self.imageDisplay.render()
+        self.buttonMinMaxFixed.setEnabled(True)
 
     @pyqtSlot()
     def onLoadMoving(self):
@@ -415,12 +408,12 @@ class ManualRegistrationWidget(QWidget):
         self.imMoving = self.normalizeImage(self.load3DTIFFImage(fname))
         self.statsMoving = ImageStat(self.imMoving)
         self.minMoving, self.maxMoving = self.statsMoving.extrema
-        self.buttonMinMaxMoving.setEnabled(True)
         self.statusBar.showMessage('Done loading from %s' % (fname,))
         self.imageDisplay.setVolumeFg(self.imMoving,
                                       self.minMoving, self.maxMoving)
         self.imageDisplay.setMatrix(self.transformMatrix)
         self.imageDisplay.render()
+        self.buttonMinMaxMoving.setEnabled(True)
 
     @pyqtSlot()
     def onClear(self):
