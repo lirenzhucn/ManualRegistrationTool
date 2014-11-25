@@ -13,10 +13,11 @@ from PyQt4.QtCore import pyqtSlot, SIGNAL
 import vtk
 from vtk.qt4.QVTKRenderWindowInteractor import QVTKRenderWindowInteractor
 
-# import matplotlib.pyplot as plt
 import skimage.io._plugins.freeimage_plugin as fi
 import numpy as np
 import sys
+
+from os.path import expanduser
 
 
 _hot_data = (
@@ -30,6 +31,8 @@ _gray_data = (
     (0.0, 0.0, 0.0, 0.0),
     (1.0, 1.0, 1.0, 1.0)
 )
+
+DATA_FOLDER = expanduser('~/Documents/Project_data')
 
 
 class VolumeRenderingManager:
@@ -95,10 +98,10 @@ class VolumeRenderingManager:
         self.alphaFunc.AddPoint(self._max, 1.0)
 
 
-class OverlayDisplayWidget(QFrame):
+class VtkFgBgDisplayWidget(QFrame):
 
     def __init__(self, parent=None):
-        super(OverlayDisplayWidget, self).__init__(parent)
+        super(VtkFgBgDisplayWidget, self).__init__(parent)
         self.imVtkBg = None
         self.imVtkFg = None
         self.matrix4x4 = vtk.vtkMatrix4x4()
@@ -112,12 +115,7 @@ class OverlayDisplayWidget(QFrame):
         self.reslice.SetOutputDimensionality(3)
         self.reslice.SetResliceAxes(self.matrix4x4)
         self.reslice.SetInterpolationModeToLinear()
-        self.mgrBg = None
-        self.mgrFg = None
         self.setupVtkRendering()
-
-    def initialize(self):
-        self.iren.Initialize()
 
     def setupVtkRendering(self):
         self.vtkWidget = QVTKRenderWindowInteractor(self)
@@ -132,37 +130,8 @@ class OverlayDisplayWidget(QFrame):
         vlayout.addWidget(self.vtkWidget)
         self.setLayout(vlayout)
 
-    def setVolumeBg(self, imBg, _min, _max):
-        if imBg is None:
-            return
-        else:
-            assert(imBg.dtype == np.uint8)
-        if self.mgrBg is None:
-            self.mgrBg = VolumeRenderingManager(_gray_data)
-            self.ren.AddVolume(self.mgrBg.volume)
-        self.mgrBg.setInput(imBg)
-        self.mgrBg.setMinMax(_min, _max)
-        self.mgrBg.update()
-
-    def setVolumeFg(self, imFg, _min, _max):
-        if imFg is None:
-            return
-        else:
-            assert(imFg.dtype == np.uint8)
-        if self.mgrFg is None:
-            self.mgrFg = VolumeRenderingManager(_hot_data, self.reslice)
-            self.ren.AddVolume(self.mgrFg.volume)
-        self.mgrFg.setInput(imFg)
-        self.mgrFg.setMinMax(_min, _max)
-        self.mgrFg.update()
-
-    def setBgMinMax(self, _min, _max):
-        self.mgrBg.setMinMax(_min, _max)
-        self.mgrBg.update()
-
-    def setFgMinMax(self, _min, _max):
-        self.mgrFg.setMinMax(_min, _max)
-        self.mgrFg.update()
+    def initialize(self):
+        self.iren.Initialize()
 
     @staticmethod
     def convertNpyToVtk(imgNpy):
@@ -211,7 +180,53 @@ class OverlayDisplayWidget(QFrame):
 
     def update(self):
         self.vtkWidget.update()
-        super(OverlayDisplayWidget, self).update()
+        super(VtkFgBgDisplayWidget, self).update()
+
+    def setVolumeBg(self, imBg, _min, _max):
+        pass
+
+    def setVolumeFg(self, imFg, _min, _max):
+        pass
+
+
+class OverlayDisplayWidget(VtkFgBgDisplayWidget):
+
+    def __init__(self, parent=None):
+        super(OverlayDisplayWidget, self).__init__(parent)
+        self.mgrBg = None
+        self.mgrFg = None
+
+    def setVolumeBg(self, imBg, _min, _max):
+        if imBg is None:
+            return
+        else:
+            assert(imBg.dtype == np.uint8)
+        if self.mgrBg is None:
+            self.mgrBg = VolumeRenderingManager(_gray_data)
+            self.ren.AddVolume(self.mgrBg.volume)
+        self.mgrBg.setInput(imBg)
+        self.mgrBg.setMinMax(_min, _max)
+        self.mgrBg.update()
+
+    def setVolumeFg(self, imFg, _min, _max):
+        if imFg is None:
+            return
+        else:
+            assert(imFg.dtype == np.uint8)
+        if self.mgrFg is None:
+            self.mgrFg = VolumeRenderingManager(_hot_data, self.reslice)
+            self.ren.AddVolume(self.mgrFg.volume)
+        self.mgrFg.setInput(imFg)
+        self.mgrFg.setMinMax(_min, _max)
+        self.mgrFg.update()
+
+    def setBgMinMax(self, _min, _max):
+        self.mgrBg.setMinMax(_min, _max)
+        self.mgrBg.update()
+
+    def setFgMinMax(self, _min, _max):
+        self.mgrFg.setMinMax(_min, _max)
+        self.mgrFg.update()
 
 
 class ManualRegistrationWidget(QWidget):
@@ -383,6 +398,7 @@ class ManualRegistrationWidget(QWidget):
     @pyqtSlot()
     def onLoadFixed(self):
         fname = QFileDialog.getOpenFileName(self, 'Load fixed image',
+                                            DATA_FOLDER,
                                             filter='TIFF Images (*.tiff *.tif)')
         fname = str(fname)
         if not fname:
@@ -400,6 +416,7 @@ class ManualRegistrationWidget(QWidget):
     @pyqtSlot()
     def onLoadMoving(self):
         fname = QFileDialog.getOpenFileName(self, 'Load fixed image',
+                                            DATA_FOLDER,
                                             filter='TIFF Images (*.tiff *.tif)')
         fname = str(fname)
         if not fname:
