@@ -256,7 +256,6 @@ class ManualRegistrationWidget(QWidget):
             (0.0, 0.0, 0.0, 1.0)
         ))
         self.updateMatrixText()
-        self.statusBar.showMessage('Ready')
 
     def setupConnection(self):
         self.buttonLoadFixed.clicked.connect(self.onLoadFixed)
@@ -278,18 +277,11 @@ class ManualRegistrationWidget(QWidget):
         self.imageDisplay.setMinimumSize(500, 500)
         self.imageDisplay.setSizePolicy(QSizePolicy.Expanding,
                                         QSizePolicy.Expanding)
-        # Status bar
-        self.statusBar = QStatusBar()
-        self.statusBar.setSizeGripEnabled(False)
-        self.statusBar.setFont(self.STATUS_FONT)
         # layout
         hlayout = QHBoxLayout()
         hlayout.addWidget(self.controlPanel)
         hlayout.addWidget(self.imageDisplay)
-        vlayout = QVBoxLayout()
-        vlayout.addLayout(hlayout)
-        vlayout.addWidget(self.statusBar)
-        self.setLayout(vlayout)
+        self.setLayout(hlayout)
 
     def setupControls(self):
         self.controlPanel = QFrame()
@@ -403,11 +395,9 @@ class ManualRegistrationWidget(QWidget):
         fname = str(fname)
         if not fname:
             return
-        self.statusBar.showMessage('Loading image from %s' % (fname,))
         self.imFixed = self.normalizeImage(self.load3DTIFFImage(fname))
         self.statsFixed = ImageStat(self.imFixed)
         self.minFixed, self.maxFixed = self.statsFixed.extrema
-        self.statusBar.showMessage('Done loading from %s' % (fname,))
         self.imageDisplay.setVolumeBg(self.imFixed,
                                       self.minFixed, self.maxFixed)
         self.imageDisplay.render()
@@ -421,11 +411,9 @@ class ManualRegistrationWidget(QWidget):
         fname = str(fname)
         if not fname:
             return
-        self.statusBar.showMessage('Loading image from %s' % (fname,))
         self.imMoving = self.normalizeImage(self.load3DTIFFImage(fname))
         self.statsMoving = ImageStat(self.imMoving)
         self.minMoving, self.maxMoving = self.statsMoving.extrema
-        self.statusBar.showMessage('Done loading from %s' % (fname,))
         self.imageDisplay.setVolumeFg(self.imMoving,
                                       self.minMoving, self.maxMoving)
         self.imageDisplay.setMatrix(self.transformMatrix)
