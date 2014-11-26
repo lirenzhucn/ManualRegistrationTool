@@ -3,9 +3,9 @@
 # my own library
 from imageproc.ImageSliceDisplay import MinMaxDialog, ImageStat
 from PyQt4.QtGui import QApplication, QFont
-from PyQt4.QtGui import QWidget, QFrame, QGroupBox
+from PyQt4.QtGui import QWidget, QFrame, QGroupBox, QTabWidget
 from PyQt4.QtGui import QPushButton, QComboBox, QLabel
-from PyQt4.QtGui import QDoubleSpinBox, QTextEdit, QStatusBar
+from PyQt4.QtGui import QDoubleSpinBox, QTextEdit
 from PyQt4.QtGui import QHBoxLayout, QVBoxLayout
 from PyQt4.QtGui import QFileDialog, QSizePolicy
 from PyQt4.QtCore import pyqtSlot, SIGNAL
@@ -18,6 +18,8 @@ import numpy as np
 import sys
 
 from os.path import expanduser
+
+from scipy.ndimage.interpolation import affine_transform
 
 
 _hot_data = (
@@ -182,12 +184,6 @@ class VtkFgBgDisplayWidget(QFrame):
         self.vtkWidget.update()
         super(VtkFgBgDisplayWidget, self).update()
 
-    def setVolumeBg(self, imBg, _min, _max):
-        pass
-
-    def setVolumeFg(self, imFg, _min, _max):
-        pass
-
 
 class OverlayDisplayWidget(VtkFgBgDisplayWidget):
 
@@ -227,6 +223,61 @@ class OverlayDisplayWidget(VtkFgBgDisplayWidget):
     def setFgMinMax(self, _min, _max):
         self.mgrFg.setMinMax(_min, _max)
         self.mgrFg.update()
+
+
+class MultiplyDisplayWidget(VtkFgBgDisplayWidget):
+
+    def __init__(self, parent=None):
+        super(MultiplyDisplayWidget, self).__init__(parent)
+        self.imBg = None
+        self.imFg = None
+        self.imFg_t = None
+        self.imOut = None
+        self.matrix = np.array(
+            [[1.0, 0.0, 0.0, 0.0],
+             [0.0, 1.0, 0.0, 0.0],
+             [0.0, 0.0, 1.0, 0.0],
+             [0.0, 0.0, 0.0, 1.0]]
+        )
+        self.mgr = None
+
+    def setupVolumes(self):
+        if (self.imBg is not None) and (self.imFg is not None):
+            self.mgr = VolumeRenderingManager(_gray_data)
+            self.ren.AddVolume(self.mgr.volume)
+            print 'Transforming volume...'
+            self.imFg_t =\
+                affine_transform(self.imFg,
+                                 matrix=self.matrix[0:3, 0:3],
+                                 offset=self.matrix[0:3, 3],
+                                 output_shape=self.imBg.shape)
+            print 'Done'
+            imOut = self.imBg * self.imFg_t
+            imOut[imOut < 0.0] = 0.0
+            imOut[imOut > 1.0] = 1.0
+            self.mgr.setInput((imOut * 255.0).astype(np.uint8))
+            self.mgr.update()
+
+    def setVolumeBg(self, imBg):
+        if imBg is not None:
+            assert(imBg.dtype == np.uint8)
+            imBg = imBg.astype(np.float)
+            imBg = (imBg - np.amin(imBg)) / (np.amax(imBg) - np.amin(imBg))
+            self.imBg = imBg
+            self.setupVolumes()
+
+    def setVolumeFg(self, imFg):
+        if imFg is not None:
+            assert(imFg.dtype == np.uint8)
+            imFg = imFg.astype(np.float)
+            imFg = (imFg - np.amin(imFg)) / (np.amax(imFg) - np.amin(imFg))
+            self.imFg = imFg
+            self.setupVolumes()
+
+    def setMatrix(self, matrix):
+        assert(matrix.shape == (4, 4))
+        self.matrix = matrix
+        self.setupVolumes()
 
 
 class ManualRegistrationWidget(QWidget):
@@ -273,14 +324,21 @@ class ManualRegistrationWidget(QWidget):
         # set font
         self.setFont(self.DEFAULT_FONT)
         self.setupControls()
-        self.imageDisplay = OverlayDisplayWidget(parent=self)
-        self.imageDisplay.setMinimumSize(500, 500)
-        self.imageDisplay.setSizePolicy(QSizePolicy.Expanding,
-                                        QSizePolicy.Expanding)
+        self.overlayDisplay = OverlayDisplayWidget(parent=self)
+        self.overlayDisplay.setMinimumSize(500, 500)
+        self.overlayDisplay.setSizePolicy(QSizePolicy.Expanding,
+                                          QSizePolicy.Expanding)
+        self.multiplyDisplay = MultiplyDisplayWidget(parent=self)
+        self.multiplyDisplay.setMinimumSize(500, 500)
+        self.multiplyDisplay.setSizePolicy(QSizePolicy.Expanding,
+                                           QSizePolicy.Expanding)
+        self.displayTab = QTabWidget(self)
+        self.displayTab.addTab(self.overlayDisplay, 'Overlay Display')
+        self.displayTab.addTab(self.multiplyDisplay, 'Multiply Display')
         # layout
         hlayout = QHBoxLayout()
         hlayout.addWidget(self.controlPanel)
-        hlayout.addWidget(self.imageDisplay)
+        hlayout.addWidget(self.displayTab)
         self.setLayout(hlayout)
 
     def setupControls(self):
@@ -379,13 +437,14 @@ class ManualRegistrationWidget(QWidget):
                                         QSizePolicy.Expanding)
 
     def initializeInteractor(self):
-        self.imageDisplay.initialize()
+        self.overlayDisplay.initialize()
+        self.multiplyDisplay.initialize()
 
     @pyqtSlot(int)
     def directionChange(self, direction):
-        self.imageDisplay.setDirection(direction)
-        self.imageDisplay.render()
-        self.imageDisplay.update()
+        self.overlayDisplay.setDirection(direction)
+        self.overlayDisplay.render()
+        self.overlayDisplay.update()
 
     @pyqtSlot()
     def onLoadFixed(self):
@@ -398,10 +457,12 @@ class ManualRegistrationWidget(QWidget):
         self.imFixed = self.normalizeImage(self.load3DTIFFImage(fname))
         self.statsFixed = ImageStat(self.imFixed)
         self.minFixed, self.maxFixed = self.statsFixed.extrema
-        self.imageDisplay.setVolumeBg(self.imFixed,
-                                      self.minFixed, self.maxFixed)
-        self.imageDisplay.render()
+        self.overlayDisplay.setVolumeBg(self.imFixed,
+                                        self.minFixed, self.maxFixed)
+        self.overlayDisplay.render()
         self.buttonMinMaxFixed.setEnabled(True)
+        self.multiplyDisplay.setVolumeBg(self.imFixed)
+        self.multiplyDisplay.render()
 
     @pyqtSlot()
     def onLoadMoving(self):
@@ -414,11 +475,13 @@ class ManualRegistrationWidget(QWidget):
         self.imMoving = self.normalizeImage(self.load3DTIFFImage(fname))
         self.statsMoving = ImageStat(self.imMoving)
         self.minMoving, self.maxMoving = self.statsMoving.extrema
-        self.imageDisplay.setVolumeFg(self.imMoving,
-                                      self.minMoving, self.maxMoving)
-        self.imageDisplay.setMatrix(self.transformMatrix)
-        self.imageDisplay.render()
+        self.overlayDisplay.setVolumeFg(self.imMoving,
+                                        self.minMoving, self.maxMoving)
+        self.overlayDisplay.setMatrix(self.transformMatrix)
+        self.overlayDisplay.render()
         self.buttonMinMaxMoving.setEnabled(True)
+        self.multiplyDisplay.setVolumeFg(self.imMoving)
+        self.multiplyDisplay.render()
 
     @pyqtSlot()
     def onClear(self):
@@ -460,7 +523,7 @@ class ManualRegistrationWidget(QWidget):
         T[2, 3] = zOffset
         self.transformMatrix = np.dot(T, self.transformMatrix)
         self.updateMatrixText()
-        self.imageDisplay.setMatrix(self.transformMatrix)
+        self.overlayDisplay.setMatrix(self.transformMatrix)
         self.onClear()
 
     @pyqtSlot()
@@ -505,19 +568,20 @@ class ManualRegistrationWidget(QWidget):
         if fname:
             self.transformMatrix = np.load(fname)
         self.updateMatrixText()
-        self.imageDisplay.setMatrix(self.transformMatrix)
+        self.overlayDisplay.setMatrix(self.transformMatrix)
+        self.multiplyDisplay.setMatrix(self.transformMatrix)
 
     @pyqtSlot()
     def minMaxChangedFixed(self):
         self.minFixed, self.maxFixed = self.mmDialogFixed.results
-        self.imageDisplay.setBgMinMax(self.minFixed, self.maxFixed)
-        self.imageDisplay.update()
+        self.overlayDisplay.setBgMinMax(self.minFixed, self.maxFixed)
+        self.overlayDisplay.update()
 
     @pyqtSlot()
     def minMaxChangedMoving(self):
         self.minMoving, self.maxMoving = self.mmDialogMoving.results
-        self.imageDisplay.setFgMinMax(self.minMoving, self.maxMoving)
-        self.imageDisplay.update()
+        self.overlayDisplay.setFgMinMax(self.minMoving, self.maxMoving)
+        self.overlayDisplay.update()
 
     def updateMatrixText(self):
         msg = np.array_str(self.transformMatrix,
